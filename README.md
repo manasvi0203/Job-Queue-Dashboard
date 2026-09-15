@@ -1,215 +1,282 @@
 # Mini Job Queue Dashboard
 
-A small full-stack job queue dashboard: **NestJS + TypeORM + SQLite** backend,
-**React (Vite)** frontend.
+A small full-stack application for creating and managing jobs through a simple dashboard.
 
-```
+The project focuses on one important backend problem: **handling job status changes safely when multiple requests try to update the same job at the same time.**
+
+## Tech Stack
+
+**Frontend:** React, Vite
+**Backend:** NestJS, TypeORM
+**Database:** SQLite
+**Validation:** class-validator
+
+## Project Structure
+
+```text
 job-queue-dashboard/
-├── backend/    NestJS API (SQLite via TypeORM)
-└── frontend/   React dashboard (Vite)
+├── backend/     # NestJS API + SQLite
+└── frontend/    # React dashboard
 ```
 
-## 1. Running it locally
+## Features
 
-Requires Node.js 18+.
+* Create and view jobs
+* Filter jobs by status
+* Move jobs through valid states
+* Delete jobs
+* Validate API input
+* Prevent invalid status transitions
+* Handle concurrent status updates safely
+* Automatically refresh the dashboard
+* Show clear error messages when an update loses a race
+
+## How the Job Flow Works
+
+Each job follows a simple state machine:
+
+```text
+pending → running → completed
+              ↘ failed
+
+pending → failed
+```
+
+Once a job reaches `completed` or `failed`, it cannot be moved to another state.
+
+The backend is responsible for enforcing these rules. The frontend only reflects them in the UI.
+
+## The Interesting Part: Concurrent Updates
+
+The main technical challenge in this project is what happens when **two requests try to update the same job at almost the same time**.
+
+For example, imagine a job is currently:
+
+```text
+pending
+```
+
+Two browser tabs both try to change it to:
+
+```text
+running
+```
+
+A simple implementation might first read the job, check its status, and then update it:
+
+```text
+read job
+↓
+check status
+↓
+update job
+```
+
+The problem is that both requests could read `pending` before either request performs the update.
+
+### The approach used
+
+Instead of relying only on application-level checks, the backend performs the status change using an **atomic conditional UPDATE**:
+
+```sql
+UPDATE jobs
+SET status = 'running'
+WHERE id = :id AND status = 'pending';
+```
+
+The database decides which request succeeds.
+
+If two requests race:
+
+* One request updates the row successfully.
+* The other request finds that the status is no longer `pending`.
+* The second request receives a `409 Conflict`.
+* The frontend then fetches the latest data from the server.
+
+This means the application doesn't silently accept conflicting updates.
+
+The important part is that the database condition is based on the **current status stored in the database**, rather than trusting the state held by the browser.
+
+## API
+
+| Method | Endpoint               | Purpose               |
+| ------ | ---------------------- | --------------------- |
+| POST   | `/jobs`                | Create a job          |
+| GET    | `/jobs`                | Get all jobs          |
+| GET    | `/jobs?status=pending` | Filter jobs by status |
+| PATCH  | `/jobs/:id/status`     | Update job status     |
+| DELETE | `/jobs/:id`            | Delete a job          |
+
+Example job:
+
+```json
+{
+  "title": "Generate monthly report",
+  "type": "report"
+}
+```
+
+Supported job types:
+
+```text
+email
+report
+data-sync
+image-processing
+other
+```
+
+Invalid input is rejected by the backend rather than relying on the frontend to validate it.
+
+## Running Locally
+
+Requires **Node.js 18+**.
 
 ### Backend
 
 ```bash
 cd backend
 npm install
-npm run start:dev       # http://localhost:3000
+npm run start:dev
 ```
 
-A `job-queue.sqlite` file is created automatically in `backend/` on first run
-(`synchronize: true` — see [Trade-offs](#4-assumptions-trade-offs--what-id-do-next)).
-No environment variables are required to run locally; `PORT` and `DB_PATH`
-are optional overrides.
+Backend runs at:
+
+```text
+http://localhost:3000
+```
+
+SQLite is created automatically when the backend starts.
 
 ### Frontend
 
 ```bash
 cd frontend
-cp .env.example .env    # VITE_API_URL=http://localhost:3000
 npm install
-npm run dev              # http://localhost:5173
+npm run dev
 ```
 
-Open `http://localhost:5173`. Make sure the backend is running first (CORS
-is open by default for this project).
+Frontend runs at:
 
-## 2. API
-
-| Method | Path                | Body                          | Notes |
-|--------|----------------------|--------------------------------|-------|
-| POST   | `/jobs`              | `{ title, type }`             | Creates a job with status `pending` |
-| GET    | `/jobs`              | –                              | Optional `?status=pending\|running\|completed\|failed` |
-| PATCH  | `/jobs/:id/status`   | `{ status }`                  | Validates the state-machine transition |
-| DELETE | `/jobs/:id`          | –                              | 204 No Content |
-
-`type` is restricted to a fixed list (`email`, `report`, `data-sync`,
-`image-processing`, `other`) so the field can't silently drift into
-inconsistent free-text values — easy to extend in
-`backend/src/jobs/dto/create-job.dto.ts`.
-
-Errors return a consistent JSON shape (`{ statusCode, error, message }`)
-via Nest's built-in exception filters:
-
-- `400` — malformed input (missing title, unknown `type`, invalid UUID, etc.)
-- `404` — job not found
-- `409` — invalid or conflicting status transition (see below)
-
-## 3. The state machine & concurrency (the interesting part)
-
-Allowed transitions:
-
-```
-pending → running → completed
-              ↘ failed
-pending → failed
+```text
+http://localhost:5173
 ```
 
-`completed` and `failed` are terminal. This is enforced with a lookup table
-in `backend/src/jobs/jobs.service.ts`:
+If required, create a `.env` file in `frontend/`:
 
-```ts
-const ALLOWED_TRANSITIONS = {
-  pending:   [running, failed],
-  running:   [completed, failed],
-  completed: [],
-  failed:    [],
-};
+```env
+VITE_API_URL=http://localhost:3000
 ```
 
-### Where should this rule be enforced?
+Make sure the backend is running before opening the frontend.
 
-**On the backend, exclusively.** The React UI mirrors the same table
-(`frontend/src/constants.js`) purely so it doesn't show a "Mark running"
-button on a completed job — that's a UX nicety, not the enforcement
-mechanism. The UI is not a trust boundary.
+## Handling Multiple Tabs
 
-### What happens if someone bypasses the frontend and calls the API directly?
+The dashboard uses two simple mechanisms to keep the UI in sync:
 
-Nothing bad. `PATCH /jobs/:id/status` re-validates the transition against
-the job's *current* status read from the database, not whatever the client
-claims. `curl -X PATCH .../status -d '{"status":"running"}'` on a completed
-job returns `409 Conflict` with a message describing which transitions are
-actually allowed. Malformed status values are rejected at `400` by
-`class-validator` before they even reach the service.
+**1. Server response after an update**
 
-### What happens when two requests arrive at nearly the same time?
+When a status update succeeds, the UI uses the server response.
 
-This is the core scenario in the brief: two browser tabs both see a job as
-`pending` and both fire `PATCH .../status { status: "running" }` within
-milliseconds of each other.
+If the request receives a `409 Conflict`, the frontend shows the error and fetches the latest jobs again.
 
-A naive implementation —
+**2. Periodic refresh**
 
-```ts
-const job = await repo.findOne(id);       // both read "pending"
-if (job.status !== 'pending') throw ...;  // both pass
-job.status = 'running';
-await repo.save(job);                     // both write "running" — "works",
-                                           // but only by luck, and the
-                                           // second write silently masks
-                                           // that a race happened at all
+The dashboard polls the backend every 5 seconds.
+
+This means if one browser tab changes a job, another open tab will eventually reflect the updated state as well.
+
+For a small project, this keeps the implementation simple without introducing WebSockets.
+
+## Design Decisions
+
+### Why SQLite?
+
+SQLite keeps the project easy to run and review because there is no separate database setup.
+
+The same conditional update approach can also be used with PostgreSQL if the application is moved to a production database.
+
+### Why enforce transitions on the backend?
+
+The frontend cannot be trusted to enforce business rules.
+
+Someone could directly call:
+
+```text
+PATCH /jobs/:id/status
 ```
 
-— has a race window between the *read* and the *write*. Both requests can
-pass the in-memory check before either one writes, especially under real
-concurrency (multiple server instances, or just unlucky timing).
+without using the React application.
 
-**Fix used here:** replace the read-then-write with a single **atomic
-conditional UPDATE**, using the status we just read as part of the `WHERE`
-clause:
+The backend therefore validates every transition independently.
 
-```sql
-UPDATE jobs SET status = 'running'
-WHERE id = :id AND status = 'pending';
+### Why no authentication?
+
+Authentication was kept outside the scope of this project.
+
+In a production system, job mutation endpoints would require authentication and status changes could also record which user or worker made the change.
+
+### Why polling instead of WebSockets?
+
+Polling every 5 seconds is enough for this dashboard and keeps the project lightweight.
+
+For a production system with many jobs or users, I would consider **WebSockets or Server-Sent Events** for real-time updates.
+
+### Why isn't there a real job worker?
+
+This project focuses on **job management and state consistency**, not job execution.
+
+A real production queue could connect this dashboard to workers that actually process jobs, with retry policies, backoff, and failure handling.
+
+## What I'd Add Next
+
+One feature I'd add next is a **job status history**.
+
+For every status change, the system could store:
+
+```text
+jobId
+fromStatus
+toStatus
+changedAt
+changedBy
 ```
 
-This statement is atomic in both SQLite and Postgres — the database (not
-application code) serializes concurrent writers to the same row. If two
-requests race:
+This would make it possible to answer questions such as:
 
-- Exactly **one** `UPDATE` matches the row and affects 1 row → that request
-  wins and returns `200` with the updated job.
-- The other `UPDATE`'s `WHERE status = 'pending'` no longer matches (the row
-  is now `running`) → **0 rows affected** → the service throws `409
-  Conflict` ("Job status was changed by another request... please refresh").
+* When did this job start running?
+* Who changed its status?
+* How many times did it fail?
+* What happened before a conflict occurred?
 
-No job ever ends up in two states, no lost updates, and the loser gets a
-clear, actionable error instead of a silent no-op or a corrupted record.
-This is implemented in `JobsService.updateStatus()` via TypeORM's
-`createQueryBuilder().update()...where(...).andWhere(...)`, which is the
-only place in the code that calls the ORM's row-locking-free "optimistic"
-conditional write.
+It would also make the system much easier to debug once multiple workers or users are involved.
 
-I deliberately avoided heavier machinery (Postgres `SELECT ... FOR UPDATE`
-transactions, a Redis distributed lock, a message queue with per-job
-sequencing) — the brief asked not to over-engineer this, and a single
-atomic conditional UPDATE fully closes the race for a single-database
-system like this one. If this were sharded across multiple databases or
-needed cross-service coordination, that's when I'd reach for a real
-distributed lock or a transactional outbox.
+## Deployment
 
-### How the frontend surfaces this
+The project is currently intended to run locally.
 
-If a tab loses the race (gets a `409`), the UI shows the server's error
-message in a toast and immediately **re-fetches jobs from the server**
-rather than trusting its local optimistic state — so the tab that lost
-self-corrects to reality instead of showing a job as "running" when it
-isn't. There's also a light 5s poll so a *second* tab picks up changes made
-in the first tab even without an explicit action, which is the more
-realistic version of the "two tabs" scenario.
+For deployment:
 
-## 4. Assumptions, trade-offs & what I'd do next
+**Backend**
 
-- **SQLite over Postgres**: the brief allows either; SQLite means zero setup
-  and the concurrency behavior described above is representative on
-  Postgres too (the same conditional-`UPDATE` pattern works unchanged if
-  `AppModule`'s TypeORM config is swapped to `postgres`).
-- **`synchronize: true`**: TypeORM auto-creates the schema from the entity
-  on boot. Fine for a take-home project; a real project would use
-  versioned migrations (`typeorm migration:generate`) so schema changes are
-  reviewable and reversible.
-- **No auth**: out of scope per the brief. In a real system, job mutation
-  endpoints (`PATCH`/`DELETE`) would require authentication, and I'd likely
-  record `updatedBy` on status changes.
-- **Polling instead of websockets**: a 5s poll is enough to demonstrate
-  cross-tab consistency without adding a websocket layer. A production
-  version would push updates (SSE or websockets) instead of polling.
-- **No job execution engine**: this only manages job *records* and their
-  status — nothing actually "runs" a job. Out of scope per the brief, but a
-  natural next step (see bonus below).
-- **`type` as a fixed enum-like list**: kept intentionally small and
-  hardcoded rather than a free-text field, to keep the data consistent
-  without adding a separate `job_types` table for a project this size.
+```bash
+npm run build
+node dist/main.js
+```
 
-### Bonus: what I'd add to make this more production-ready
+The backend can be deployed to a Node-compatible host. If SQLite is used in production, persistent storage is required.
 
-**A row-level "reason" and structured audit trail on every status change**
-(`job_status_history` table: `jobId, fromStatus, toStatus, changedAt`),
-written in the same atomic operation as the status update. I chose this
-over, say, adding retries/backoff or a real job runner because it directly
-strengthens the exact problem the brief focuses on: **observability into
-concurrent/conflicting state changes.** Right now a `409` conflict is
-visible to the client in the moment but leaves no trace afterward — with a
-history table, you could answer "who/what actually flipped this job to
-`running`, and did anything else attempt to and fail?" after the fact,
-which matters a lot once you have more than one worker or more than one
-human touching the same queue.
+**Frontend**
 
-## 5. Deployment
+```bash
+npm run build
+```
 
-Not deployed in this submission — see the note in my submission message for
-why, and the two commands below to do it in a few minutes:
+The generated `dist/` folder can be deployed to a static hosting service.
 
-- **Backend**: any Node host works (Render, Railway, Fly.io). Build with
-  `npm run build`, start with `node dist/main.js`. Set `PORT` if required by
-  the platform. SQLite file persistence requires a persistent disk/volume
-  on most PaaS providers (or swap to a managed Postgres — just change the
-  `type` in `AppModule`'s `TypeOrmModule.forRoot`).
-- **Frontend**: any static host (Vercel, Netlify). Build with `npm run
-  build`, set `VITE_API_URL` to the deployed backend URL, deploy the
-  `dist/` folder.
+Set:
+
+```env
+VITE_API_URL=<deployed-backend-url>
+```
+

@@ -6,7 +6,7 @@ The project focuses on one important backend problem: **handling job status chan
 
 ## Live Demo
 
-**Frontend:** https://job-queue-dashboard-b8e8druf3-mansia13s-projects.vercel.app/
+**Frontend:** https://job-queue-dashboard-b8e8druf3-mansia13s-projects.vercel.app
 **Backend API:** https://job-queue-dashboard-7qh9.onrender.com/jobs
 
 > Open the **Frontend** link to use the dashboard. The backend URL is the API used by the frontend.

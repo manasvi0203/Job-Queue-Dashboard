@@ -4,6 +4,13 @@ A small full-stack application for creating and managing jobs through a simple d
 
 The project focuses on one important backend problem: **handling job status changes safely when multiple requests try to update the same job at the same time.**
 
+## Live Demo
+
+**Frontend:** https://job-queue-dashboard-b8e8druf3-mansia13s-projects.vercel.app/
+**Backend API:** https://job-queue-dashboard-7qh9.onrender.com/jobs
+
+> Open the **Frontend** link to use the dashboard. The backend URL is the API used by the frontend.
+
 ## Tech Stack
 
 **Frontend:** React, Vite
@@ -172,15 +179,15 @@ Make sure the backend is running before opening the frontend.
 
 ## Handling Multiple Tabs
 
-The dashboard uses two simple mechanisms to keep the UI in sync:
+The dashboard uses two simple mechanisms to keep the UI in sync.
 
-**1. Server response after an update**
+### Server response after an update
 
 When a status update succeeds, the UI uses the server response.
 
 If the request receives a `409 Conflict`, the frontend shows the error and fetches the latest jobs again.
 
-**2. Periodic refresh**
+### Periodic refresh
 
 The dashboard polls the backend every 5 seconds.
 
@@ -253,30 +260,34 @@ It would also make the system much easier to debug once multiple workers or user
 
 ## Deployment
 
-The project is currently intended to run locally.
+The project is deployed as two separate services:
 
-For deployment:
+### Frontend — Vercel
 
-**Backend**
+The React/Vite frontend is deployed on Vercel.
 
-```bash
-npm run build
-node dist/main.js
-```
+**Live application:** https://YOUR-VERCEL-URL.vercel.app
 
-The backend can be deployed to a Node-compatible host. If SQLite is used in production, persistent storage is required.
-
-**Frontend**
-
-```bash
-npm run build
-```
-
-The generated `dist/` folder can be deployed to a static hosting service.
-
-Set:
+The frontend uses the following environment variable:
 
 ```env
-VITE_API_URL=<deployed-backend-url>
+VITE_API_URL=https://YOUR-RENDER-URL.onrender.com
 ```
+
+### Backend — Render
+
+The NestJS API is deployed on Render.
+
+**Live API:** https://YOUR-RENDER-URL.onrender.com
+
+The API endpoints are available under:
+
+```text
+GET    /jobs
+POST   /jobs
+PATCH  /jobs/:id/status
+DELETE /jobs/:id
+```
+
+The frontend communicates with this backend API to create, update, retrieve, and delete jobs.
 

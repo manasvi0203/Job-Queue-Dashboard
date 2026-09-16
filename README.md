@@ -6,9 +6,11 @@ The project focuses on one important backend problem: **handling job status chan
 
 ## Live Demo
 
-**Frontend:** https://job-queue-dashboard-b8e8druf3-mansia13s-projects.vercel.app
-**Backend API:** https://job-queue-dashboard-7qh9.onrender.com/jobs
+**Frontend:**  
+https://job-queue-dashboard-b8e8druf3-mansia13s-projects.vercel.app 
 
+**Backend API:**  
+https://job-queue-dashboard-7qh9.onrender.com/jobs
 > Open the **Frontend** link to use the dashboard. The backend URL is the API used by the frontend.
 
 ## Tech Stack
@@ -266,19 +268,19 @@ The project is deployed as two separate services:
 
 The React/Vite frontend is deployed on Vercel.
 
-**Live application:** https://YOUR-VERCEL-URL.vercel.app
+**Live application:** https://job-queue-dashboard-b8e8druf3-mansia13s-projects.vercel.app 
 
 The frontend uses the following environment variable:
 
 ```env
-VITE_API_URL=https://YOUR-RENDER-URL.onrender.com
+VITE_API_URL= https://job-queue-dashboard-7qh9.onrender.com
 ```
 
 ### Backend — Render
 
 The NestJS API is deployed on Render.
 
-**Live API:** https://YOUR-RENDER-URL.onrender.com
+**Live API:** https://job-queue-dashboard-7qh9.onrender.com/jobs
 
 The API endpoints are available under:
 
